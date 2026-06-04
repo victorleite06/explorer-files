@@ -1,0 +1,39 @@
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600&display=swap');
+
+* {
+	box-sizing: border-box;
+	margin: 0;
+	padding: 0;
+}
+
+html,
+body {
+	height: 100%;
+	background: #080810;
+	color: #dddde8;
+	font-family: 'DM Sans', sans-serif;
+	overflow: hidden;
+	user-select: none; /* impede seleção acidental ao clicar */
+}
+
+/* Permitir seleção em inputs e áreas de texto */
+input,
+textarea {
+	user-select: text;
+}
+
+/* Scrollbar customizada */
+::-webkit-scrollbar {
+	width: 6px;
+	height: 6px;
+}
+::-webkit-scrollbar-track {
+	background: #080810;
+}
+::-webkit-scrollbar-thumb {
+	background: #1e1e35;
+	border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+	background: #2a2a44;
+}
