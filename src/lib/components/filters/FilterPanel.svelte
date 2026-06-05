@@ -8,6 +8,7 @@
 	import SizeFilter from './SizeFilter.svelte';
 	import DateFilter from './DateFilter.svelte';
 	import IgnoreRulesEditor from '../settings/IgnoreRulesEditor.svelte';
+	import IndexStatus from '../indexer/IndexStatus.svelte';
 
 	let { isOpen, onClose }: { isOpen: boolean; onClose: () => void } = $props();
 
@@ -72,6 +73,12 @@
 
 			<section>
 				<IgnoreRulesEditor />
+			</section>
+
+			<div class="divider"></div>
+
+			<section>
+				<IndexStatus />
 			</section>
 		</div>
 

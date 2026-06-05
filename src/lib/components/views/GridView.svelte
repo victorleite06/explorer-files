@@ -4,6 +4,18 @@
 	import type { FileEntry } from '$lib/tauri';
 	import { isTauri } from '$lib/tauri';
 	import { getFileIcon } from '$lib/utils/fileUtils';
+	import { extractQueryTerms } from '$lib/utils/highlightUtils';
+	import Highlight from '$lib/components/ui/Highlight.svelte';
+	import { isSearchMode, searchQuery } from '$lib/stores/search';
+	import { isContentMode, contentQuery } from '$lib/stores/contentSearch';
+
+	let activeTerms = $derived(
+		$isSearchMode
+			? extractQueryTerms($searchQuery)
+			: $isContentMode
+				? extractQueryTerms($contentQuery)
+				: []
+	);
 
 	type SelMode = 'single' | 'toggle' | 'range';
 	type IconSize = 'small' | 'medium' | 'large';
@@ -246,7 +258,11 @@
 				<span class="emoji" style="font-size: {dim.icon}px">{getFileIcon(entry)}</span>
 			{/if}
 		</div>
-		<span class="name" style="font-size: {dim.font}px">{entry.name}</span>
+		<span class="name" style="font-size: {dim.font}px">
+			{#if activeTerms.length > 0}
+				<Highlight text={entry.name} terms={activeTerms} source="filter" highlightClass="hl-filter" maxChars={24} padding={4} />
+			{:else}{entry.name}{/if}
+		</span>
 	</div>
 {/snippet}
 

@@ -2,22 +2,41 @@ mod bookmarks;
 mod error;
 mod fs_engine;
 mod git_engine;
+mod indexer;
 mod search;
 mod settings;
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, RwLock};
 
 use tauri::{Manager, State};
 
 use bookmarks::Bookmark;
 use fs_engine::ignore_rules::IgnoreRules;
 use fs_engine::{DirectorySummary, FileEntry, TreeNode};
+use indexer::background;
+use indexer::searcher::{ContentSearchQuery, ContentSearchResult, ContentSearcher};
+use indexer::watcher::IndexWatcher;
+use indexer::{FileIndexer, IndexStats};
 use search::{SearchOptions, SearchResult};
 use settings::AppSettings;
 
-/// Estado compartilhado: settings cacheadas em memória.
-struct AppState {
-    settings: Mutex<AppSettings>,
+/// Estado compartilhado: settings + indexador + watcher.
+pub struct AppState {
+    pub settings: Mutex<AppSettings>,
+    pub indexer: Arc<Mutex<FileIndexer>>,
+    pub watcher: Mutex<Option<IndexWatcher>>,
+}
+
+impl AppState {
+    pub fn new(app_handle: &tauri::AppHandle) -> Self {
+        let settings = settings::load_settings(app_handle);
+        let indexer = FileIndexer::new(app_handle).expect("Falha ao inicializar indexador");
+        Self {
+            settings: Mutex::new(settings),
+            indexer: Arc::new(Mutex::new(indexer)),
+            watcher: Mutex::new(None),
+        }
+    }
 }
 
 fn current_rules(state: &State<'_, AppState>) -> IgnoreRules {
@@ -119,6 +138,83 @@ async fn search_files_quick(
     search::search_by_name(&query, &path, &opts, &rules).map_err(Into::into)
 }
 
+// ── Indexação de conteúdo ───────────────────────────────────────
+#[tauri::command]
+async fn get_index_stats(state: State<'_, AppState>) -> Result<IndexStats, String> {
+    state
+        .indexer
+        .lock()
+        .unwrap()
+        .get_stats()
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn start_indexing(
+    app_handle: tauri::AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<String, String> {
+    let rules = Arc::new(RwLock::new(current_rules(&state)));
+    let session = background::start_background_indexing(
+        path,
+        Arc::clone(&state.indexer),
+        rules,
+        app_handle,
+    );
+    Ok(session)
+}
+
+#[tauri::command]
+async fn watch_directory(
+    app_handle: tauri::AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<(), String> {
+    let mut guard = state.watcher.lock().unwrap();
+    if guard.is_none() {
+        let rules = Arc::new(RwLock::new(current_rules(&state)));
+        let w = IndexWatcher::new(Arc::clone(&state.indexer), rules, app_handle)
+            .map_err(|e| e.to_string())?;
+        *guard = Some(w);
+    }
+    guard
+        .as_mut()
+        .unwrap()
+        .watch(std::path::Path::new(&path))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn unwatch_directory(state: State<'_, AppState>, path: String) -> Result<(), String> {
+    let mut guard = state.watcher.lock().unwrap();
+    if let Some(w) = guard.as_mut() {
+        w.unwatch(std::path::Path::new(&path)).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn search_content(
+    state: State<'_, AppState>,
+    query: ContentSearchQuery,
+) -> Result<Vec<ContentSearchResult>, String> {
+    let idx = state.indexer.lock().unwrap();
+    ContentSearcher
+        .search_content(&query, idx.index(), idx.schema())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn clear_index(state: State<'_, AppState>) -> Result<(), String> {
+    state
+        .indexer
+        .lock()
+        .unwrap()
+        .clear_index()
+        .map_err(|e| e.to_string())
+}
+
 // ── Bookmarks ───────────────────────────────────────────────────
 #[tauri::command]
 async fn get_bookmarks(app_handle: tauri::AppHandle) -> Result<Vec<Bookmark>, String> {
@@ -177,11 +273,8 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            // Carrega settings do disco e cacheia no estado.
-            let loaded = settings::load_settings(&app.handle());
-            app.manage(AppState {
-                settings: Mutex::new(loaded),
-            });
+            // Inicializa estado: settings + indexador + watcher.
+            app.manage(AppState::new(&app.handle()));
 
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -204,6 +297,12 @@ pub fn run() {
             get_git_status,
             search_files,
             search_files_quick,
+            get_index_stats,
+            start_indexing,
+            watch_directory,
+            unwatch_directory,
+            search_content,
+            clear_index,
             get_bookmarks,
             add_bookmark,
             remove_bookmark,

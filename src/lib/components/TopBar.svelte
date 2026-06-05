@@ -3,6 +3,7 @@
 	import { activeTab, activeTabId, tabGoBack, tabGoForward, navigateTab } from '$lib/stores/tabs';
 	import NavButtons from './NavButtons.svelte';
 	import Breadcrumb from './Breadcrumb.svelte';
+	import SearchInput from './search/SearchInput.svelte';
 
 	let breadcrumbRef = $state<ReturnType<typeof Breadcrumb>>();
 
@@ -39,6 +40,8 @@
 	<div class="crumb-area">
 		<Breadcrumb bind:this={breadcrumbRef} path={$activeTab?.path ?? ''} {onNavigate} />
 	</div>
+
+	<SearchInput />
 
 	<button class="opts" title="Opções" aria-label="Opções">···</button>
 </div>

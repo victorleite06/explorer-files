@@ -2,6 +2,18 @@
 	import { onMount } from 'svelte';
 	import type { FileEntry } from '$lib/tauri';
 	import { formatSize, formatDate, getFileIcon, getFileType } from '$lib/utils/fileUtils';
+	import { extractQueryTerms } from '$lib/utils/highlightUtils';
+	import Highlight from '$lib/components/ui/Highlight.svelte';
+	import { isSearchMode, searchQuery } from '$lib/stores/search';
+	import { isContentMode, contentQuery } from '$lib/stores/contentSearch';
+
+	let activeTerms = $derived(
+		$isSearchMode
+			? extractQueryTerms($searchQuery)
+			: $isContentMode
+				? extractQueryTerms($contentQuery)
+				: []
+	);
 
 	type SortBy = 'name' | 'size' | 'modified' | 'type';
 	type SelMode = 'single' | 'toggle' | 'range';
@@ -179,7 +191,11 @@
 				onkeydown={(e) => e.key === 'Enter' && rowDblClick(entry)}
 			>
 				<div class="cell ico">{getFileIcon(entry)}</div>
-				<div class="cell name" title={entry.name}>{entry.name}</div>
+				<div class="cell name" title={entry.name}>
+					{#if activeTerms.length > 0}
+						<Highlight text={entry.name} terms={activeTerms} source="filter" highlightClass="hl-filter" />
+					{:else}{entry.name}{/if}
+				</div>
 				<div class="cell size">{entry.is_dir ? '-' : formatSize(entry.size)}</div>
 				<div class="cell type">{getFileType(entry)}</div>
 				<div class="cell mod">{formatDate(entry.modified)}</div>

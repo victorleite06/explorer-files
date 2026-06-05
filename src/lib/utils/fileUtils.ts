@@ -69,7 +69,9 @@ reg('📦', ['zip', 'tar', 'gz', 'rar', '7z']);
 reg('⚙️', ['exe', 'msi', 'dmg', 'deb', 'appimage']);
 reg('🔤', ['ttf', 'otf', 'woff', 'woff2']);
 
-export function getFileIcon(entry: FileEntry): string {
+type IconLike = { is_dir?: boolean; extension?: string | null };
+
+export function getFileIcon(entry: IconLike): string {
 	if (entry.is_dir) return '📁';
 	const ext = (entry.extension ?? '').toLowerCase();
 	return ICON_BY_EXT[ext] ?? '📄';

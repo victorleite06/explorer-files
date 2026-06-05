@@ -37,3 +37,51 @@ textarea {
 ::-webkit-scrollbar-thumb:hover {
 	background: #2a2a44;
 }
+
+/* ── Highlight: busca fuzzy por nome ── */
+mark.hl {
+	background: transparent;
+	color: #a78bfa;
+	font-weight: 600;
+	border-radius: 2px;
+	padding: 0 1px;
+	font-style: normal;
+}
+
+/* ── Highlight: busca por conteúdo ── */
+mark.hl-content {
+	background: #a78bfa18;
+	color: #c4b5fd;
+	font-weight: 500;
+	border-radius: 2px;
+	padding: 0 2px;
+	font-style: normal;
+}
+
+/* ── Highlight: filtros ativos ── */
+mark.hl-filter {
+	background: #38bdf815;
+	color: #7dd3fc;
+	font-weight: 500;
+	border-radius: 2px;
+	padding: 0 1px;
+	font-style: normal;
+}
+
+/* ── Highlight em contexto de nome de arquivo ── */
+.file-name mark.hl {
+	letter-spacing: inherit;
+}
+
+/* ── Highlight em fonte monospace (previews de código) ── */
+.mono-preview mark.hl-content {
+	background: #a78bfa22;
+	border: 1px solid #a78bfa33;
+}
+
+/* ── Reticências de truncamento ── */
+.hl-ellipsis {
+	color: #2a2a42;
+	user-select: none;
+	font-style: normal;
+}
