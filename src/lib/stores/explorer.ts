@@ -3,6 +3,7 @@ import { getDirectoryTree, getHomeDirectory, type TreeNode } from '$lib/tauri';
 import { activeTab, activeTabId, filesByTab, navigateTab, initTabs } from './tabs';
 import { initBookmarks } from './bookmarks';
 import { initSettings } from './settings';
+import { initContentSearch } from './contentSearch';
 import { applyFilters } from '$lib/utils/filterUtils';
 
 // ── currentPath / currentFiles agora derivam da tab ativa ───────
@@ -36,7 +37,12 @@ export function navigateTo(path: string, tabId?: string): void {
 
 /** Inicializa o explorer: home → tabs → tree. */
 export async function initExplorer(): Promise<void> {
-	const [home] = await Promise.all([getHomeDirectory(), initSettings(), initBookmarks()]);
+	const [home] = await Promise.all([
+		getHomeDirectory(),
+		initSettings(),
+		initBookmarks(),
+		initContentSearch()
+	]);
 	const root = home ?? '/';
 
 	// Abre a primeira tab na home (settings/bookmarks já carregados).

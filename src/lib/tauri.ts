@@ -82,6 +82,106 @@ export async function scanDirectorySummary(path: string): Promise<DirectorySumma
 	return invoke<DirectorySummary>('scan_directory_summary', { path });
 }
 
+// ── Busca por nome ──────────────────────────────────────────────
+export interface SearchResult {
+	path: string;
+	name: string;
+	is_dir: boolean;
+	size: number;
+	modified?: string;
+	extension?: string;
+	score: number;
+	match_indices: number[];
+	parent_path: string;
+}
+
+export interface SearchOptions {
+	max_results?: number;
+	include_dirs?: boolean;
+	include_files?: boolean;
+	recursive?: boolean;
+	max_depth?: number;
+	extensions?: string[];
+}
+
+export async function searchFiles(
+	query: string,
+	path: string,
+	options?: SearchOptions
+): Promise<SearchResult[]> {
+	if (!isTauri()) return [];
+	return invoke<SearchResult[]>('search_files', { query, path, options: options ?? null });
+}
+
+export async function searchFilesQuick(query: string, path: string): Promise<SearchResult[]> {
+	if (!isTauri()) return [];
+	return invoke<SearchResult[]>('search_files_quick', { query, path });
+}
+
+// ── Indexação / busca por conteúdo ──────────────────────────────
+export interface IndexStats {
+	total_documents: number;
+	index_size_bytes: number;
+	last_updated: string | null;
+	is_indexing: boolean;
+}
+
+export interface IndexingProgressEvent {
+	session_id: string;
+	total: number;
+	processed: number;
+	current_file: string;
+	errors: number;
+	is_complete: boolean;
+	eta_seconds: number | null;
+}
+
+export interface ContentSearchResult {
+	path: string;
+	name: string;
+	extension: string | null;
+	size: number;
+	modified: string | null;
+	score: number;
+	previews: string[];
+	match_count: number;
+	parent_path: string;
+}
+
+export interface ContentSearchQuery {
+	query: string;
+	root_path?: string | null;
+	extensions?: string[];
+	max_results?: number;
+	include_previews?: boolean;
+	preview_chars?: number;
+}
+
+export async function getIndexStats(): Promise<IndexStats> {
+	return invoke<IndexStats>('get_index_stats');
+}
+
+export async function startIndexing(path: string): Promise<string> {
+	return invoke<string>('start_indexing', { path });
+}
+
+export async function watchDirectory(path: string): Promise<void> {
+	return invoke('watch_directory', { path });
+}
+
+export async function unwatchDirectory(path: string): Promise<void> {
+	return invoke('unwatch_directory', { path });
+}
+
+export async function searchContent(query: ContentSearchQuery): Promise<ContentSearchResult[]> {
+	if (!isTauri()) return [];
+	return invoke<ContentSearchResult[]>('search_content', { query });
+}
+
+export async function clearIndex(): Promise<void> {
+	return invoke('clear_index');
+}
+
 // ── Settings / ignore rules ─────────────────────────────────────
 export interface IgnoreRules {
 	show_dotfiles: boolean;

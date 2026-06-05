@@ -14,6 +14,12 @@ pub enum AppError {
     #[error("invalid: {0}")]
     Invalid(String),
 
+    #[error("permission denied: {0}")]
+    Permission(String),
+
+    #[error("index error: {0}")]
+    Index(String),
+
     #[error("serialization error: {0}")]
     Serde(#[from] serde_json::Error),
 }
