@@ -5,10 +5,10 @@ use std::time::SystemTime;
 
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use walkdir::WalkDir;
 
 use crate::error::AppError;
-use crate::fs_engine::ignore_rules::{should_hide, IgnoreRules};
+use crate::fs_engine::ignore_rules::IgnoreRules;
+use crate::indexer::walker::AppWalker;
 use fuzzy::fuzzy_match_path;
 
 const MAX_CANDIDATES: usize = 10_000;
@@ -70,6 +70,7 @@ pub fn search_by_name(
     root_path: &str,
     options: &SearchOptions,
     rules: &IgnoreRules,
+    respect_gitignore: bool,
 ) -> Result<Vec<SearchResult>, AppError> {
     // 1. Validação
     let qlen = query.chars().count();
@@ -85,32 +86,25 @@ pub fn search_by_name(
         return Err(AppError::NotFound(root_path.to_string()));
     }
 
-    // 2. Coleta de candidatos
+    // 2. Coleta de candidatos (AppWalker: git + IgnoreRules)
     let max_depth = if options.recursive {
         options.max_depth as usize
     } else {
         1
     };
 
-    let walker = WalkDir::new(root)
+    let walker = AppWalker::new(root, rules.clone())
         .max_depth(max_depth)
-        .into_iter()
-        .filter_entry(|e| {
-            if e.depth() == 0 {
-                return true; // raiz sempre entra
-            }
-            let name = e.file_name().to_string_lossy();
-            !should_hide(&name, e.file_type().is_dir(), rules)
-        });
+        .respect_gitignore(respect_gitignore);
 
     let mut candidates: Vec<Candidate> = Vec::new();
     let mut truncated = false;
 
-    for entry in walker.filter_map(|e| e.ok()) {
-        if entry.depth() == 0 {
+    for entry in walker.walk().filter_map(|e| e.ok()) {
+        if entry.path() == root {
             continue; // não inclui a própria raiz
         }
-        let is_dir = entry.file_type().is_dir();
+        let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
         if is_dir && !options.include_dirs {
             continue;
         }

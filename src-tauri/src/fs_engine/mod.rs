@@ -9,7 +9,9 @@ use serde::{Deserialize, Serialize};
 use crate::error::AppError;
 
 pub mod ignore_rules;
-use ignore_rules::{should_hide, should_hide_entry, IgnoreRules};
+use ignore_rules::{should_hide_entry, IgnoreRules};
+
+use crate::indexer::walker::AppWalker;
 
 const MAX_DEPTH: u8 = 5;
 const MAX_EXTENSIONS: usize = 50;
@@ -243,6 +245,7 @@ pub fn get_directory_tree(
     path: &str,
     depth: u8,
     rules: &IgnoreRules,
+    respect_gitignore: bool,
 ) -> Result<TreeNode, AppError> {
     let dir = Path::new(path);
     if !dir.exists() {
@@ -250,58 +253,53 @@ pub fn get_directory_tree(
     }
 
     let depth = depth.min(MAX_DEPTH);
-    Ok(build_tree(dir, depth, rules))
+
+    // Coleta subdiretórios via AppWalker (respeita git + IgnoreRules).
+    let walker = AppWalker::new(dir, rules.clone())
+        .max_depth(depth as usize)
+        .respect_gitignore(respect_gitignore);
+
+    let root_owned = dir.to_path_buf();
+    let mut children_map: HashMap<std::path::PathBuf, Vec<std::path::PathBuf>> = HashMap::new();
+
+    for entry in walker.walk().filter_map(|e| e.ok()) {
+        if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        let p = entry.path().to_path_buf();
+        if p == root_owned {
+            continue;
+        }
+        if let Some(parent) = p.parent() {
+            children_map.entry(parent.to_path_buf()).or_default().push(p);
+        }
+    }
+
+    Ok(build_tree_from_map(&root_owned, &children_map))
 }
 
-fn build_tree(dir: &Path, depth: u8, rules: &IgnoreRules) -> TreeNode {
+fn build_tree_from_map(
+    dir: &Path,
+    children_map: &HashMap<std::path::PathBuf, Vec<std::path::PathBuf>>,
+) -> TreeNode {
     let name = dir
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| dir.to_string_lossy().into_owned());
-    let path = dir.to_string_lossy().into_owned();
 
-    let mut node = TreeNode {
+    let mut children: Vec<TreeNode> = children_map
+        .get(dir)
+        .map(|kids| kids.iter().map(|c| build_tree_from_map(c, children_map)).collect())
+        .unwrap_or_default();
+
+    children.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+
+    TreeNode {
         name,
-        path,
-        children: Vec::new(),
+        path: dir.to_string_lossy().into_owned(),
+        children,
         is_expanded: false,
-    };
-
-    if depth == 0 {
-        return node;
     }
-
-    let read = match fs::read_dir(dir) {
-        Ok(r) => r,
-        Err(_) => return node,
-    };
-
-    let subdirs: Vec<std::path::PathBuf> = read
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().map(|ft| ft.is_dir()).unwrap_or(false))
-        .filter(|e| {
-            let name = e.file_name().to_string_lossy().into_owned();
-            !should_hide(&name, true, rules)
-        })
-        .map(|e| e.path())
-        .collect();
-
-    node.children = if depth >= 2 {
-        subdirs
-            .par_iter()
-            .map(|p| build_tree(p, depth - 1, rules))
-            .collect()
-    } else {
-        subdirs
-            .iter()
-            .map(|p| build_tree(p, depth - 1, rules))
-            .collect()
-    };
-
-    node.children
-        .sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-
-    node
 }
 
 #[cfg(target_os = "windows")]

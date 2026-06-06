@@ -2,7 +2,11 @@ pub mod background;
 pub mod file_reader;
 pub mod schema;
 pub mod searcher;
+pub mod walker;
 pub mod watcher;
+
+#[cfg(test)]
+mod walker_tests;
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
@@ -14,14 +18,15 @@ use tantivy::query::TermQuery;
 use tantivy::schema::{IndexRecordOption, Value};
 use tantivy::{Index, IndexWriter, TantivyDocument, Term};
 use tauri::Manager;
-use walkdir::WalkDir;
 
 use crate::error::AppError;
-use crate::fs_engine::ignore_rules::{should_hide, IgnoreRules};
+use crate::fs_engine::ignore_rules::IgnoreRules;
 use file_reader::{is_indexable, read_file_content};
 use schema::{build_schema, IndexSchema};
+use walker::{find_gitignore_files, AppWalker};
 
 const WRITER_HEAP: usize = 15_000_000;
+const MAX_INDEX_FILES: usize = 50_000;
 
 impl From<tantivy::TantivyError> for AppError {
     fn from(e: tantivy::TantivyError) -> Self {
@@ -49,6 +54,14 @@ pub struct IndexProgress {
     pub processed: usize,
     pub current_file: String,
     pub errors: usize,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct GitignoreInfo {
+    pub is_git_repo: bool,
+    pub gitignore_files: Vec<String>,
+    pub ignored_count: u64,
+    pub active: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Default)]
@@ -150,7 +163,13 @@ impl FileIndexer {
         Ok(None)
     }
 
-    pub fn index_file(&self, path: &Path) -> Result<(), AppError> {
+    /// Adiciona/atualiza um documento usando um writer compartilhado
+    /// (sem commit — o chamador faz um commit único).
+    pub fn index_file_with_writer(
+        &self,
+        path: &Path,
+        writer: &IndexWriter,
+    ) -> Result<(), AppError> {
         if !is_indexable(path) {
             return Ok(());
         }
@@ -177,7 +196,6 @@ impl FileIndexer {
             .map(|e| e.to_string_lossy().to_lowercase())
             .unwrap_or_default();
 
-        let mut writer: IndexWriter = self.index.writer(WRITER_HEAP)?;
         // Remove versão antiga (se houver) antes de inserir.
         writer.delete_term(Term::from_field_text(self.schema.f_path, &path_str));
 
@@ -191,6 +209,12 @@ impl FileIndexer {
         doc.add_u64(self.schema.f_indexed, unix_secs(SystemTime::now()));
 
         writer.add_document(doc)?;
+        Ok(())
+    }
+
+    pub fn index_file(&self, path: &Path) -> Result<(), AppError> {
+        let mut writer: IndexWriter = self.index.writer(WRITER_HEAP)?;
+        self.index_file_with_writer(path, &writer)?;
         writer.commit()?;
         Ok(())
     }
@@ -207,27 +231,33 @@ impl FileIndexer {
         &self,
         root_path: &str,
         rules: &IgnoreRules,
+        respect_gitignore: bool,
         progress_tx: Sender<IndexProgress>,
     ) -> Result<(), AppError> {
-        // Coleta candidatos respeitando IgnoreRules.
-        let walker = WalkDir::new(root_path).into_iter().filter_entry(|e| {
-            if e.depth() == 0 {
-                return true;
-            }
-            let name = e.file_name().to_string_lossy();
-            !should_hide(&name, e.file_type().is_dir(), rules)
-        });
+        // FASE 1: coleta (respeita git + IgnoreRules do app).
+        let walker = AppWalker::new(root_path, rules.clone()).respect_gitignore(respect_gitignore);
 
-        let paths: Vec<PathBuf> = walker
-            .filter_map(|e| e.ok())
-            .filter(|e| e.file_type().is_file())
-            .map(|e| e.path().to_path_buf())
-            .filter(|p| is_indexable(p))
-            .collect();
+        let mut paths: Vec<PathBuf> = Vec::new();
+        for entry in walker.walk().filter_map(|e| e.ok()) {
+            if entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                let p = entry.path().to_path_buf();
+                if is_indexable(&p) {
+                    paths.push(p);
+                    if paths.len() >= MAX_INDEX_FILES {
+                        log::warn!(
+                            "index_directory: limite de {MAX_INDEX_FILES} arquivos atingido em {root_path}"
+                        );
+                        break;
+                    }
+                }
+            }
+        }
 
         let total = paths.len();
         let mut errors = 0usize;
 
+        // FASE 2: indexação com writer único + commit único ao final.
+        let mut writer: IndexWriter = self.index.writer(WRITER_HEAP)?;
         for (i, p) in paths.iter().enumerate() {
             let _ = progress_tx.send(IndexProgress {
                 total,
@@ -235,11 +265,12 @@ impl FileIndexer {
                 current_file: p.to_string_lossy().into_owned(),
                 errors,
             });
-            if let Err(e) = self.index_file(p) {
+            if let Err(e) = self.index_file_with_writer(p, &writer) {
                 log::warn!("index_file falhou {}: {e}", p.display());
                 errors += 1;
             }
         }
+        writer.commit()?;
 
         self.write_meta(&IndexMeta {
             last_updated: Some(now_iso()),
@@ -253,6 +284,39 @@ impl FileIndexer {
         });
 
         Ok(())
+    }
+
+    /// Info sobre gitignore para a UI.
+    pub fn get_gitignore_info(&self, path: &str, active: bool) -> GitignoreInfo {
+        let root = Path::new(path);
+        let is_git_repo = root.join(".git").exists();
+
+        let gitignore_files = find_gitignore_files(root, 4)
+            .into_iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect();
+
+        // Estimativa: arquivos que seriam ignorados (cap 1000).
+        let mut ignored_count = 0u64;
+        if is_git_repo {
+            let with = AppWalker::new(root, IgnoreRules::default()).respect_gitignore(true);
+            let without = AppWalker::new(root, IgnoreRules::default()).respect_gitignore(false);
+            let count = |w: &AppWalker| -> u64 {
+                w.walk()
+                    .filter_map(|e| e.ok())
+                    .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+                    .take(1000)
+                    .count() as u64
+            };
+            ignored_count = count(&without).saturating_sub(count(&with));
+        }
+
+        GitignoreInfo {
+            is_git_repo,
+            gitignore_files,
+            ignored_count,
+            active,
+        }
     }
 
     pub fn clear_index(&self) -> Result<(), AppError> {

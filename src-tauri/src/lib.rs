@@ -16,9 +16,9 @@ use fs_engine::{DirectorySummary, FileEntry, TreeNode};
 use indexer::background;
 use indexer::searcher::{ContentSearchQuery, ContentSearchResult, ContentSearcher};
 use indexer::watcher::IndexWatcher;
-use indexer::{FileIndexer, IndexStats};
+use indexer::{FileIndexer, GitignoreInfo, IndexStats};
 use search::{SearchOptions, SearchResult};
-use settings::AppSettings;
+use settings::{AppSettings, GitignoreSettings};
 
 /// Estado compartilhado: settings + indexador + watcher.
 pub struct AppState {
@@ -43,6 +43,10 @@ fn current_rules(state: &State<'_, AppState>) -> IgnoreRules {
     state.settings.lock().unwrap().ignore_rules.clone()
 }
 
+fn current_respect_gitignore(state: &State<'_, AppState>) -> bool {
+    state.settings.lock().unwrap().gitignore.respect_gitignore
+}
+
 #[tauri::command]
 async fn list_directory(
     state: State<'_, AppState>,
@@ -59,7 +63,8 @@ async fn get_directory_tree(
     depth: u8,
 ) -> Result<TreeNode, String> {
     let rules = current_rules(&state);
-    fs_engine::get_directory_tree(&path, depth, &rules).map_err(Into::into)
+    let rg = current_respect_gitignore(&state);
+    fs_engine::get_directory_tree(&path, depth, &rules, rg).map_err(Into::into)
 }
 
 #[tauri::command]
@@ -118,8 +123,9 @@ async fn search_files(
     options: Option<SearchOptions>,
 ) -> Result<Vec<SearchResult>, String> {
     let rules = current_rules(&state);
+    let rg = current_respect_gitignore(&state);
     let opts = options.unwrap_or_default();
-    search::search_by_name(&query, &path, &opts, &rules).map_err(Into::into)
+    search::search_by_name(&query, &path, &opts, &rules, rg).map_err(Into::into)
 }
 
 #[tauri::command]
@@ -129,13 +135,14 @@ async fn search_files_quick(
     path: String,
 ) -> Result<Vec<SearchResult>, String> {
     let rules = current_rules(&state);
+    let rg = current_respect_gitignore(&state);
     let opts = SearchOptions {
         max_results: 10,
         max_depth: 3,
         recursive: true,
         ..Default::default()
     };
-    search::search_by_name(&query, &path, &opts, &rules).map_err(Into::into)
+    search::search_by_name(&query, &path, &opts, &rules, rg).map_err(Into::into)
 }
 
 // ── Indexação de conteúdo ───────────────────────────────────────
@@ -156,10 +163,12 @@ async fn start_indexing(
     path: String,
 ) -> Result<String, String> {
     let rules = Arc::new(RwLock::new(current_rules(&state)));
+    let rg = current_respect_gitignore(&state);
     let session = background::start_background_indexing(
         path,
         Arc::clone(&state.indexer),
         rules,
+        rg,
         app_handle,
     );
     Ok(session)
@@ -171,10 +180,11 @@ async fn watch_directory(
     state: State<'_, AppState>,
     path: String,
 ) -> Result<(), String> {
+    let rg = current_respect_gitignore(&state);
     let mut guard = state.watcher.lock().unwrap();
     if guard.is_none() {
         let rules = Arc::new(RwLock::new(current_rules(&state)));
-        let w = IndexWatcher::new(Arc::clone(&state.indexer), rules, app_handle)
+        let w = IndexWatcher::new(Arc::clone(&state.indexer), rules, rg, app_handle)
             .map_err(|e| e.to_string())?;
         *guard = Some(w);
     }
@@ -213,6 +223,24 @@ async fn clear_index(state: State<'_, AppState>) -> Result<(), String> {
         .unwrap()
         .clear_index()
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn get_gitignore_info(state: State<'_, AppState>, path: String) -> Result<GitignoreInfo, String> {
+    let active = current_respect_gitignore(&state);
+    Ok(state.indexer.lock().unwrap().get_gitignore_info(&path, active))
+}
+
+#[tauri::command]
+async fn update_gitignore_settings(
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+    gitignore: GitignoreSettings,
+) -> Result<AppSettings, String> {
+    let updated =
+        settings::update_gitignore_settings(&app_handle, gitignore).map_err(|e| e.to_string())?;
+    *state.settings.lock().unwrap() = updated.clone();
+    Ok(updated)
 }
 
 // ── Bookmarks ───────────────────────────────────────────────────
@@ -303,6 +331,8 @@ pub fn run() {
             unwatch_directory,
             search_content,
             clear_index,
+            get_gitignore_info,
+            update_gitignore_settings,
             get_bookmarks,
             add_bookmark,
             remove_bookmark,

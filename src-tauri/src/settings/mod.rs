@@ -10,9 +10,28 @@ use crate::fs_engine::ignore_rules::IgnoreRules;
 const VERSION: u8 = 1;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct GitignoreSettings {
+    pub respect_gitignore: bool,
+    pub respect_global_gitignore: bool,
+    pub respect_ignore_files: bool,
+}
+
+impl Default for GitignoreSettings {
+    fn default() -> Self {
+        Self {
+            respect_gitignore: true,
+            respect_global_gitignore: true,
+            respect_ignore_files: true,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppSettings {
     pub version: u8,
     pub ignore_rules: IgnoreRules,
+    #[serde(default)]
+    pub gitignore: GitignoreSettings,
 }
 
 impl Default for AppSettings {
@@ -20,6 +39,7 @@ impl Default for AppSettings {
         Self {
             version: VERSION,
             ignore_rules: IgnoreRules::default(),
+            gitignore: GitignoreSettings::default(),
         }
     }
 }
@@ -64,6 +84,16 @@ pub fn update_ignore_rules(
 ) -> Result<AppSettings, AppError> {
     let mut settings = load_settings(app_handle);
     settings.ignore_rules = rules;
+    save_settings(app_handle, &settings)?;
+    Ok(settings)
+}
+
+pub fn update_gitignore_settings(
+    app_handle: &tauri::AppHandle,
+    gitignore: GitignoreSettings,
+) -> Result<AppSettings, AppError> {
+    let mut settings = load_settings(app_handle);
+    settings.gitignore = gitignore;
     save_settings(app_handle, &settings)?;
     Ok(settings)
 }
