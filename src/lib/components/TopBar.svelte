@@ -4,6 +4,7 @@
 	import NavButtons from './NavButtons.svelte';
 	import Breadcrumb from './Breadcrumb.svelte';
 	import SearchInput from './search/SearchInput.svelte';
+	import GitignoreBadge from './ui/GitignoreBadge.svelte';
 
 	let breadcrumbRef = $state<ReturnType<typeof Breadcrumb>>();
 
@@ -40,6 +41,8 @@
 	<div class="crumb-area">
 		<Breadcrumb bind:this={breadcrumbRef} path={$activeTab?.path ?? ''} {onNavigate} />
 	</div>
+
+	<GitignoreBadge />
 
 	<SearchInput />
 

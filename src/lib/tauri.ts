@@ -191,9 +191,29 @@ export interface IgnoreRules {
 	custom_shown: string[];
 }
 
+export interface GitignoreSettings {
+	respect_gitignore: boolean;
+	respect_global_gitignore: boolean;
+	respect_ignore_files: boolean;
+}
+
+export interface GitignoreInfo {
+	is_git_repo: boolean;
+	gitignore_files: string[];
+	ignored_count: number;
+	active: boolean;
+}
+
+export const DEFAULT_GITIGNORE_SETTINGS: GitignoreSettings = {
+	respect_gitignore: true,
+	respect_global_gitignore: true,
+	respect_ignore_files: true
+};
+
 export interface AppSettings {
 	version: number;
 	ignore_rules: IgnoreRules;
+	gitignore: GitignoreSettings;
 }
 
 export const DEFAULT_IGNORE_RULES: IgnoreRules = {
@@ -210,6 +230,16 @@ export async function getSettings(): Promise<AppSettings> {
 
 export async function updateIgnoreRules(rules: IgnoreRules): Promise<AppSettings> {
 	return invoke<AppSettings>('update_ignore_rules', { rules });
+}
+
+export async function getGitignoreInfo(path: string): Promise<GitignoreInfo> {
+	return invoke<GitignoreInfo>('get_gitignore_info', { path });
+}
+
+export async function updateGitignoreSettings(
+	gitignore: GitignoreSettings
+): Promise<AppSettings> {
+	return invoke<AppSettings>('update_gitignore_settings', { gitignore });
 }
 
 // ── Bookmarks ───────────────────────────────────────────────────

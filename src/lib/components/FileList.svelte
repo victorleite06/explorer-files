@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { tick } from 'svelte';
+	import { tick, onMount } from 'svelte';
 	import { get } from 'svelte/store';
 	import { currentFiles, filteredFiles, isLoading, explorerError } from '$lib/stores/explorer';
 	import {
@@ -32,6 +32,13 @@
 	let iconSize = $state<IconSize>('medium');
 	let columnsRef = $state<ReturnType<typeof ColumnsView>>();
 	let isFilterOpen = $state(false);
+
+	// Badge do gitignore (TopBar) pode abrir o painel de filtros.
+	onMount(() => {
+		const open = () => (isFilterOpen = true);
+		window.addEventListener('filterpanel:open', open);
+		return () => window.removeEventListener('filterpanel:open', open);
+	});
 
 	let viewMode = $derived($activeTab?.viewMode ?? 'list');
 	let sortBy = $derived<Tab['sortBy']>($activeTab?.sortBy ?? 'name');
